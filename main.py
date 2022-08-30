@@ -11,7 +11,7 @@ from pathlib import Path
 import random
 
 from enum import Enum
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from cvlib.object_detection import draw_bbox
 
@@ -26,6 +26,7 @@ from utils.plots import plot_one_box
 from utils.torch_utils import time_synchronized
 
 app = FastAPI(title='Nine-dash-line')
+app.openapi_url = '/adtechhcm/ndl-predict/openapi.json'
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 # device = 'cpu'
@@ -55,6 +56,17 @@ if not os.path.exists(save_dir):
 @app.get("/")
 def home():
     return "The Nine-dash-line API is running. Please head over to http://localhost:8000/docs."
+
+@app.get("/app")
+def read_main(request: Request):
+    return {"message": "Hello World", "root_path": request.scope.get("root_path")}
+
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+    )
+
 
 # This endpoint handles all the logic necessary for the object detection to work.
 # It requires the desired model and the image in which to perform object detection.

@@ -7,12 +7,15 @@ import torch
 from pathlib import Path
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from ..models.experimental import attempt_load
-from ..utils.datasets import LoadImages, letterbox
-from ..utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
+import sys
+sys.path.insert(1, '/opt/work/yolov7')
+
+from models.experimental import attempt_load
+from utils.datasets import LoadImages, letterbox
+from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
     scale_coords, xyxy2xywh
-from ..utils.plots import plot_one_box
-from ..utils.torch_utils import time_synchronized
+from utils.plots import plot_one_box
+from utils.torch_utils import time_synchronized
 
 def check_valid_video_folder():
     if not os.path.exists("video_temp"):
@@ -50,10 +53,12 @@ def init_model(cf):
     if not os.path.exists(save_dir):
         os.mkdir(save_dir)
 
+    print('Finished init model')
+
     return model, names, colors, imgsz, stride, save_dir
 
 def predict_video(video_url, cf):
-
+    print('Hi')
     video_name = download_video(video_url)
     
     this_dir = 'video_temp/{}'.format(video_name.split("/")[-1].split(".")[0])
