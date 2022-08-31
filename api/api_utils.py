@@ -6,7 +6,8 @@ import urllib3
 import torch
 from pathlib import Path
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
+import cv2
+import random
 import sys
 sys.path.insert(1, '/opt/work/yolov7')
 
@@ -24,12 +25,14 @@ def check_valid_video_folder():
 def download_video(video_url):
     # header = random_headers()
     # response = requests.get(video_url, headers=header, stream=True, verify=False, timeout=5)
+    if not os.path.exists('video_temp'):
+        os.mkdir('video_temp')
     try:
         response = requests.get(video_url, verify=False)
         # prefix = "video_temp/" + datetime.today().strftime("%Y_%m_%d_%H_%M_%S_")
         prefix = "video_temp/"
         vid_name = prefix + video_url.split('/')[-1]
-        # print("vid_name: ", vid_name)
+        print("vid_name: ", vid_name)
         with open(vid_name, 'wb') as f:
             f.write(response.content)
     except Exception as e:
@@ -41,7 +44,7 @@ def init_model(cf):
 
     device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
     # device = 'cpu'
-    half = device != 'cpu'
+    
     model = attempt_load(cf.model['weight'], map_location=device)
     names = model.module.names if hasattr(model, 'module') else model.names
     colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
@@ -55,11 +58,14 @@ def init_model(cf):
 
     print('Finished init model')
 
-    return model, names, colors, imgsz, stride, save_dir
+    return model, names, colors, imgsz, stride, save_dir, device
 
 def predict_video(video_url, cf):
     print('Hi')
+    st_dl = time.time()
     video_name = download_video(video_url)
+    end_dl = time.time()
+    print('Download costs: {}s'.format(end_dl-st_dl))
     
     this_dir = 'video_temp/{}'.format(video_name.split("/")[-1].split(".")[0])
     if not os.path.exists(this_dir):
@@ -71,15 +77,19 @@ def predict_video(video_url, cf):
         while success:
             cv2.imwrite("{}/frame{}.jpg".format(this_dir, count), image)     # save frame as JPEG file      
             success,image = vidcap.read()
-            print('Read a new frame: ', success)
+            # print('Read a new frame: ', success)
             count += 1
-    else:
-        pass
-    
-    dataset = LoadImages(this_dir, img_size=640, stride=stride)
+        else:
+            pass
 
-    model, names, colors, imgsz, stride, save_dir = init_model(cf)
-    
+    st = time.time()
+    model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
+    dataset = LoadImages(this_dir, img_size=640, stride=stride)
+    half = device != 'cpu'
+
+    if half:
+        model = model.half()
+
     for path, img, im0s, vid_cap in dataset:
         img = torch.from_numpy(img).to(device)
         img = img.half() if half else img.float()  # uint8 to fp16/32
@@ -93,7 +103,7 @@ def predict_video(video_url, cf):
         t2 = time_synchronized()
 
         # Apply NMS
-        pred = non_max_suppression(pred, cf.model['conf_thres'], cf.model['iou_thres'])
+        pred = non_max_suppression(pred, cf.model['conf'], cf.model['iou'])
         t3 = time_synchronized()
 
         # Process detections
@@ -128,14 +138,112 @@ def predict_video(video_url, cf):
                         plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
 
             # Print time (inference + NMS)
-            print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
+            # print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
 
             # Save results (image with detections)
             if cf.save_img:
                 # if dataset.mode == 'image':
                 cv2.imwrite(save_path, im0)
-                print(f" The image with the result is saved in: {save_path}")
+                # print(f" The image with the result is saved in: {save_path}")
             if det.size(dim=0) > 0:
+                end_time = time.time()
+                print('Init and predict cost: {}s'.format(end_time - st))
                 return "nine_dash_line"
-        
+    
+    end_time = time.time()
+    print('Init and predict cost: {}s'.format(end_time - st))
+    return "binh_thuong"
+
+
+def predict_video_path(path, cf):
+    print('Hi')
+    video_name = path
+    
+    this_dir = 'video_temp/{}'.format(video_name.split("/")[-1].split(".")[0])
+    if not os.path.exists(this_dir):
+        os.mkdir(this_dir)
+            
+        vidcap = cv2.VideoCapture(video_name)
+        success,image = vidcap.read()
+        count = 0
+        while success:
+            cv2.imwrite("{}/frame{}.jpg".format(this_dir, count), image)     # save frame as JPEG file      
+            success,image = vidcap.read()
+            # print('Read a new frame: ', success)
+            count += 1
+        else:
+            pass
+
+    st = time.time()
+    model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
+    dataset = LoadImages(this_dir, img_size=640, stride=stride)
+    end_init = time.time()
+    print('Init and load dataset cost: {}s'.format(end_init-st))
+    half = device != 'cpu'
+
+    if half:
+        model = model.half()
+
+    for path, img, im0s, vid_cap in dataset:
+        img = torch.from_numpy(img).to(device)
+        img = img.half() if half else img.float()  # uint8 to fp16/32
+        img /= 255.0  # 0 - 255 to 0.0 - 1.0
+        if img.ndimension() == 3:
+            img = img.unsqueeze(0)
+
+        # Inference
+        t1 = time_synchronized()
+        pred = model(img)[0]
+        t2 = time_synchronized()
+
+        # Apply NMS
+        pred = non_max_suppression(pred, cf.model['conf'], cf.model['iou'])
+        t3 = time_synchronized()
+
+        # Process detections
+        for i, det in enumerate(pred):  # detections per image
+            # print(det, det.size())
+            
+            p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+
+            p = Path(p)  # to Path
+            save_path = '{}/{}'.format(save_dir, p.name)  # img.jpg
+            txt_path = '{}/{}'.format(save_dir, p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
+            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
+            if len(det):
+                # Rescale boxes from img_size to im0 size
+                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+
+                # Print results
+                for c in det[:, -1].unique():
+                    n = (det[:, -1] == c).sum()  # detections per class
+                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+
+                # Write results
+                for *xyxy, conf, cls in reversed(det):
+                    if cf.save_img:  # Write to file
+                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        line = (cls, *xywh, conf)  # label format
+                        with open(txt_path + '.txt', 'a') as f:
+                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
+
+                    if cf.save_img:  # Add bbox to image
+                        label = f'{names[int(cls)]} {conf:.2f}'
+                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+
+            # Print time (inference + NMS)
+            # print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
+
+            # Save results (image with detections)
+            if cf.save_img:
+                # if dataset.mode == 'image':
+                cv2.imwrite(save_path, im0)
+                # print(f" The image with the result is saved in: {save_path}")
+            if det.size(dim=0) > 0:
+                end_time = time.time()
+                print('Init and predict cost: {}s'.format(end_time - st))
+                return "nine_dash_line"
+    
+    end_time = time.time()
+    print('Init and predict cost: {}s'.format(end_time - st))
     return "binh_thuong"

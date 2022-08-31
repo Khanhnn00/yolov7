@@ -16,6 +16,8 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+
 def clip_coords(boxes, shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
     if isinstance(boxes, torch.Tensor):  # faster individually
@@ -134,11 +136,10 @@ def detect(save_img=False):
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
                     if save_crop:
-                        if cls == 2:
+                        # if cls == 2:
+                        tlbr = torch.tensor(xyxy).tolist()
+                        if abs(int(tlbr[1])-int(tlbr[3])) * abs(int(tlbr[0]) - int(tlbr[2])) >= 0.5*256*256:
                             print('cropping image ...')
-                            tlbr = torch.tensor(xyxy).tolist()
-                            print(tlbr)
-                            print(img_org.shape)
                             # b = xyxy2xywh(xyxy)
                             # b[:, 2:] = b[:, 2:] * 1.02 + 10
                             # xyxy = xywh2xyxy(b).long()
