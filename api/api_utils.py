@@ -96,6 +96,7 @@ def predict_video_path(path, model, stride, device, cf, save_dir):
     vidcap.release()
     end = time.time()
     time_extract = round(end - st)
+    os.remove(video_name)
 
     # print("len of dataset: {}".format(len(frames)))
     half = device != 'cpu'
@@ -165,17 +166,17 @@ def predict_video_path(path, model, stride, device, cf, save_dir):
 
 
                         # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf) # label format
-                        with open('{}/result.txt'.format(save_dir), 'a') as f:
-                            f.write(('%g ' * len(line)).rstrip() % line + '\n')
-                        f.close()
+                        # xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                        # line = (cls, *xywh, conf) # label format
+                        # with open('{}/logs.txt'.format(save_dir), 'a') as f:
+                        #     f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                        # f.close()
 
-                        # Add bbox to image
-                        label = f'{conf:.2f}'
-                        # plot_one_box(xyxy, im0s[ind+i], label=label, color=colors[int(cls)], line_thickness=1)
-                        plot_one_box(xyxy, im0, label=label, line_thickness=3)
-                        cv2.imwrite('{}/{}.jpg'.format(save_dir, vid_name), im0)
+                        # # Add bbox to image
+                        # label = f'{conf:.2f}'
+                        # # plot_one_box(xyxy, im0s[ind+i], label=label, color=colors[int(cls)], line_thickness=1)
+                        # plot_one_box(xyxy, im0, label=label, line_thickness=3)
+                        # cv2.imwrite('{}/{}.jpg'.format(save_dir, vid_name), im0)
                         # print("The image with the result is saved in: video_temp/{}.png".format(vid_name))
                     
         
@@ -208,7 +209,7 @@ def predict_video_path(path, model, stride, device, cf, save_dir):
         f.write('{} \n'.format(dt_string))
         f.write('Extracting video costs: {}s \n'.format(time_extract))
         f.write('Detection costs: {}s to run over video {}.mp4 with length of {}s \n'.format(round(end_time - st), vid_name, duration))
-        f.write('Total bboxes found: {}, where {} bboxes have conf > 0.55 and {} bboxes have conf < 0.5 \n'.format(cnt_total, hard_margin, soft_margin))
+        f.write('Total bboxes found: {}. Bboxes have conf > 0.55: {}. Bboxes have conf < 0.5: {} \n'.format(cnt_total, hard_margin, soft_margin))
         f.write('Rating: {} and {} \n'.format(rating_hard, rating_soft))
         f.write('Final label: {} \n'.format(label))
         f.write('\n')

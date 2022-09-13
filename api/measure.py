@@ -41,39 +41,41 @@ if __name__ == '__main__':
     import config as cf
     # url = './video_temp/1FtLrM_dyZc.mp4'
     # run(url)
+    url = 'https://app.lotuscdn.vn/2022/7/17/video1658010868822.7383.mov'
     model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
-    pth = '/opt/work/dataset/downloaded'
-    videos = os.listdir(pth)
-    save_dir = 'exp_ndl_frame5_margin'
-    cnt = 0
-    total = len(videos)
-    print(total)
-    sum_hard = 0
-    sum_soft = 0
-    ndl = normal = lst_soft = lst_hard = []
-    for vid in tqdm(videos):
-        url = '{}/{}'.format(pth, vid)
-        res, rating_hard, rating_soft, vid_name  = predict_video_path(url, model, stride, device, cf, save_dir)
-        print(res)
-        if res == "ndl":
-            print(url)
-            cnt += 1
-            ndl.append(vid_name)
-        else:
-            normal.append(vid_name)
+    res = predict_video_path(url, model, stride, device, cf, save_dir)
+    print(res)
+    # pth = '/opt/work/dataset/downloaded'
+    # videos = os.listdir(pth)
+    # cnt = 0
+    # total = len(videos)
+    # print(total)
+    # sum_hard = 0
+    # sum_soft = 0
+    # ndl = normal = lst_soft = lst_hard = []
+    # for vid in tqdm(videos):
+    #     url = '{}/{}'.format(pth, vid)
+    #     res, rating_hard, rating_soft, vid_name  = predict_video_path(url, model, stride, device, cf, save_dir)
+    #     print(res)
+    #     if res == "ndl":
+    #         print(url)
+    #         cnt += 1
+    #         ndl.append(vid_name)
+    #     else:
+    #         normal.append(vid_name)
 
-        if rating_hard < 0.5:
-            lst_hard.append(vid_name)
+    #     if rating_hard < 0.5:
+    #         lst_hard.append(vid_name)
         
-        if rating_soft > 0.5:
-            lst_soft.append(vid_name)
-        sum_hard += rating_hard
-        sum_soft += rating_soft
+    #     if rating_soft > 0.5:
+    #         lst_soft.append(vid_name)
+    #     sum_hard += rating_hard
+    #     sum_soft += rating_soft
     
-    print(cnt, total)
-    # print(lst_hard,)
-    # print(lst_soft)
-    print('Avg hard margin: {}'.format(sum_hard/total))
-    print('Avg soft margin: {}'.format(sum_soft/total))
+    # print(cnt, total)
+    # # print(lst_hard,)
+    # # print(lst_soft)
+    # print('Avg hard margin: {}'.format(sum_hard/total))
+    # print('Avg soft margin: {}'.format(sum_soft/total))
     # print(ndl)
     # print(normal)
