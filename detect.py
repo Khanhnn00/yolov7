@@ -10,13 +10,51 @@ import numpy as np
 from numpy import random
 
 from models.experimental import attempt_load
-from utils.datasets import LoadStreams, LoadImages
+from utils.datasets import LoadStreams, LoadImages, letterbox
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path
 from utils.plots import plot_one_box
 from utils.torch_utils import select_device, load_classifier, time_synchronized, TracedModel
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+
+def pad(img, sv):
+    h, w, c = img.shape
+    pad_h = sv - h
+    pad_w = sv - w
+    pad = np.zeros((sv, sv, 3))
+    h, w, c = pad.shape
+
+    if pad_h == 0 and pad_w == 0:
+        return img
+
+    elif pad_h == 0 and pad_w != 0:
+        tmp = pad_w // 2
+        if pad_w % 2 == 0:
+            pad[:h, tmp:w-tmp, :] = img
+        else:
+            pad[:h, tmp:w-tmp-1, :] = img
+    
+    elif pad_h != 0 and pad_w == 0:
+        tmp = pad_h // 2
+        if pad_h % 2 == 0:
+            pad[tmp:h-tmp, :w, :] = img
+        else:
+            pad[tmp:h-tmp-1, :w, :] = img
+    else:
+        tmp_h = pad_h // 2
+        tmp_w = pad_w // 2
+        if pad_h % 2 == 0:
+            if pad_w % 2 == 0:
+                pad[tmp_w:h-tmp_h, tmp_w:w-tmp_w, :] = img
+            else:
+                pad[tmp_w:h-tmp_h, tmp_w:w-tmp_w-1, :] = img
+        else:
+            if pad_w % 2 == 0:
+                pad[tmp_w:h-tmp_h-1, tmp_w:w-tmp_w, :] = img
+            else:
+                pad[tmp_w:h-tmp_h-1, tmp_w:w-tmp_w-1, :] = img
+    return pad
 
 def clip_coords(boxes, shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
@@ -84,6 +122,7 @@ def detect(save_img=False):
     old_img_b = 1
 
     t0 = time.time()
+    class_dict = {}
     for path, img, im0s, vid_cap in dataset:
         img_org = im0s.copy()
         img = torch.from_numpy(img).to(device)
@@ -135,6 +174,10 @@ def detect(save_img=False):
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
+                    if cls not in class_dict:
+                        class_dict[cls] = 1
+                    else:
+                        class_dict[cls] += 1
                     if save_crop:
                         # if cls == 2:
                         tlbr = torch.tensor(xyxy).tolist()
@@ -145,6 +188,8 @@ def detect(save_img=False):
                             # xyxy = xywh2xyxy(b).long()
                             # clip_coords(xyxy, im.shape)
                             crop = img_org[int(tlbr[1]):int(tlbr[3]), int(tlbr[0]):int(tlbr[2]), ::1]  # box wh * gain + pad
+                            shape_max = max(crop.shape[0], crop.shape[1])
+                            crop = pad(crop, shape_max)
                             # print(crop.shape)
                             cv2.imwrite('{}/{}'.format(crop_dir, p.name) , crop)
                             print('finished cropping image ... ')
@@ -190,7 +235,7 @@ def detect(save_img=False):
     if save_txt or save_img:
         s = f"\n{len(list(save_dir.glob('labels/*.txt')))} labels saved to {save_dir / 'labels'}" if save_txt else ''
         #print(f"Results saved to {save_dir}{s}")
-
+    print(class_dict)
     print(f'Done. ({time.time() - t0:.3f}s)')
 
 

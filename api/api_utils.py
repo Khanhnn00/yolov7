@@ -1,4 +1,5 @@
 import requests
+import numpy as np
 import time
 from datetime import datetime
 import os
@@ -9,7 +10,9 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import cv2
 import random
 import sys
-sys.path.insert(1, '/opt/work/yolov7')
+import shutil
+from datetime import datetime
+sys.path.insert(1, '/opt/work/yolov7')  
 
 from models.experimental import attempt_load
 from utils.datasets import LoadImages, letterbox
@@ -18,9 +21,9 @@ from utils.general import check_img_size, check_requirements, check_imshow, non_
 from utils.plots import plot_one_box
 from utils.torch_utils import time_synchronized
 
-def check_valid_video_folder():
-    if not os.path.exists("video_temp"):
-        os.makedirs("video_temp")
+def check_valid_video_folder(url):
+    if not os.path.exists(url):
+        os.makedirs(url)
 
 def download_video(video_url):
     # header = random_headers()
@@ -40,66 +43,91 @@ def download_video(video_url):
         vid_name = None
     return vid_name
 
-def init_model(cf):
+def predict_batch(model, imgs):
+        bboxes = model(imgs)[0]
+        return bboxes
 
-    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
-    # device = 'cpu'
+def preprocess_img(img, stride):
+    h0, w0 = img.shape[0], img.shape[1]
+    r = 640 / max(h0, w0)  # resize image to img_size
+    if r != 1:  # always resize down, only resize up if training with augmentation
+        interp = cv2.INTER_AREA
+        img = cv2.resize(img, (int(w0 * r), int(h0 * r)), interpolation=interp)
     
-    model = attempt_load(cf.model['weight'], map_location=device)
-    names = model.module.names if hasattr(model, 'module') else model.names
-    colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
-    stride = int(model.stride.max())  # model stride
-    imgsz = cf.model['image_size']
-    model.eval()
+    img = letterbox(img, stride=stride)[0]
+    img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+    img = np.ascontiguousarray(img)
+    return img/255.
 
-    save_dir = 'results_detect'
-    if not os.path.exists(save_dir):
-        os.mkdir(save_dir)
-
-    print('Finished init model')
-
-    return model, names, colors, imgsz, stride, save_dir, device
-
-def predict_video(video_url, cf):
-    print('Hi')
-    st_dl = time.time()
-    video_name = download_video(video_url)
-    end_dl = time.time()
-    print('Download costs: {}s'.format(end_dl-st_dl))
-    
-    this_dir = 'video_temp/{}'.format(video_name.split("/")[-1].split(".")[0])
-    if not os.path.exists(this_dir):
-        os.mkdir(this_dir)
-            
-        vidcap = cv2.VideoCapture(video_name)
+def predict_video_path(path, model, stride, device, cf, save_dir):
+    # video_name = path
+    # vid_name = path.split('/')[-1].split('.')[0]
+    video_name = download_video(path)
+    vid_name = video_name.split('/')[-1].split('.')[0]
+    # print(vid_name)
+    check_valid_video_folder(save_dir)
+    st = time.time()
+    vidcap = cv2.VideoCapture(video_name)
+    fps = round(vidcap.get(cv2.CAP_PROP_FPS))
+    frame_count = round(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = round(frame_count/fps)
+    # print(duration)
+    # print(fps)
+    if not fps:
+        fps = 25
+    # success,image = vidcap.read()
+    count = 0
+    frames = []
+    im0s = []
+    preprocess_time = 0
+    while vidcap.isOpened():
         success,image = vidcap.read()
-        count = 0
-        while success:
-            cv2.imwrite("{}/frame{}.jpg".format(this_dir, count), image)     # save frame as JPEG file      
-            success,image = vidcap.read()
-            # print('Read a new frame: ', success)
+        if isinstance(image, np.ndarray):
+            if count % fps == 0:
+                sub_st = time.time()
+                frames.append(preprocess_img(image, stride))
+                sub_end = time.time()
+                preprocess_time += sub_end - sub_st
+                im0s.append(image)
+                # cv2.imwrite("{}/frame{}.jpg".format(this_dir, count), image)     # save frame as JPEG file      
             count += 1
         else:
-            pass
+            break
+    vidcap.release()
+    end = time.time()
+    time_extract = round(end - st)
 
-    st = time.time()
-    model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
-    dataset = LoadImages(this_dir, img_size=640, stride=stride)
+    # print("len of dataset: {}".format(len(frames)))
     half = device != 'cpu'
 
     if half:
         model = model.half()
 
-    for path, img, im0s, vid_cap in dataset:
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+    label = "normal"
+
+    ind = 0
+    bs = 64
+    st = time.time()
+    hard_margin = 0
+    soft_margin = 0
+    cnt_total = 0
+    cnt = 0
+    while ind < len(frames):
+        if ind + bs <= len(frames):
+            batch = frames[ind:ind+bs]
+        else:
+            batch = frames[ind:ind+bs]
+            batch += [frames[-1]]*bs
+            batch = batch[:bs]
+
+        # batch = batch/255.
+        batch = np.array(batch)
+        batch = torch.from_numpy(batch).to(device)
+        batch = batch.half() if half else batch.float()  # uint8 to fp16/32
 
         # Inference
         t1 = time_synchronized()
-        pred = model(img)[0]
+        pred = predict_batch(model, batch)
         t2 = time_synchronized()
 
         # Apply NMS
@@ -107,93 +135,155 @@ def predict_video(video_url, cf):
         t3 = time_synchronized()
 
         # Process detections
-        for i, det in enumerate(pred):  # detections per image
-            # print(det, det.size())
-            
-            p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+        
+        thresh = 5
+        
+        for i, det in enumerate(pred): # 64 C H W
+            # print(ind, i)
+            # print(len(im0s)) # detections per image
+            if ind + i >= len(im0s):
+                pass
+            else:
+                im0 = im0s[ind+i]
+                gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]
+                
+                if len(det):
+                    cnt_total += len(det)
+                    # Rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(frames[ind+i].shape[1:], det[:, :4], im0.shape).round()
 
-            p = Path(p)  # to Path
-            save_path = '{}/{}'.format(save_dir, p.name)  # img.jpg
-            txt_path = '{}/{}'.format(save_dir, p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            if len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                    # Print results
 
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                    # Write results
+                    for *xyxy, conf, cls in reversed(det):
+                        if conf >= 0.55:
+                            hard_margin += 1
+                            cnt += 1
+                        
+                        if conf < 0.5:
+                            soft_margin += 1
 
-                # Write results
-                for *xyxy, conf, cls in reversed(det):
-                    if cf.save_img:  # Write to file
+
+                        # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
+                        line = (cls, *xywh, conf) # label format
+                        with open('{}/result.txt'.format(save_dir), 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                        f.close()
 
-                    if cf.save_img:  # Add bbox to image
-                        label = f'{names[int(cls)]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
+                        # Add bbox to image
+                        label = f'{conf:.2f}'
+                        # plot_one_box(xyxy, im0s[ind+i], label=label, color=colors[int(cls)], line_thickness=1)
+                        plot_one_box(xyxy, im0, label=label, line_thickness=3)
+                        cv2.imwrite('{}/{}.jpg'.format(save_dir, vid_name), im0)
+                        # print("The image with the result is saved in: video_temp/{}.png".format(vid_name))
+                    
+        
+        ind += bs
 
-            # Print time (inference + NMS)
-            # print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
-
-            # Save results (image with detections)
-            if cf.save_img:
-                # if dataset.mode == 'image':
-                cv2.imwrite(save_path, im0)
-                # print(f" The image with the result is saved in: {save_path}")
-            if det.size(dim=0) > 0:
-                end_time = time.time()
-                print('Init and predict cost: {}s'.format(end_time - st))
-                return "nine_dash_line"
-    
     end_time = time.time()
-    print('Init and predict cost: {}s'.format(end_time - st))
-    return "binh_thuong"
+    # shutil.rmtree(this_dir)
+    print('Extracting video costs: {}s'.format(time_extract))
+    print('Detection costs: {}s to run over video {}.mp4 with length of {}s'.format(round(end_time - st), vid_name, duration))
+    print('Total bboxes found: {}'.format(cnt_total))
+    print('Total bboxes with c  onf > 0.55: {}'.format(hard_margin))
+    print('Total bboxes with conf < 0.5: {}'.format(soft_margin))
+    if cnt_total == 0:
+        rating_hard = 0
+        rating_soft = 0
+    else:
+        rating_hard = hard_margin/cnt_total
+        rating_soft = soft_margin/cnt_total
 
+    if cnt >= thresh:
+        label = "ndl"
+    else:
+        label = "normal"
 
-def predict_video_path(path, cf):
-    print('Hi')
-    video_name = path
+    print('Rating hard: {}'.format(rating_hard))
+    print('Rating soft: {}'.format(rating_soft))
+    now = datetime.now()
+    dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
+    with open('{}/{}.txt'.format(save_dir, 'result'), 'a') as f:
+        f.write('{} \n'.format(dt_string))
+        f.write('Extracting video costs: {}s \n'.format(time_extract))
+        f.write('Detection costs: {}s to run over video {}.mp4 with length of {}s \n'.format(round(end_time - st), vid_name, duration))
+        f.write('Total bboxes found: {}, where {} bboxes have conf > 0.55 and {} bboxes have conf < 0.5 \n'.format(cnt_total, hard_margin, soft_margin))
+        f.write('Rating: {} and {} \n'.format(rating_hard, rating_soft))
+        f.write('Final label: {} \n'.format(label))
+        f.write('\n')
+        f.write('\n')
+    f.close()
+
     
-    this_dir = 'video_temp/{}'.format(video_name.split("/")[-1].split(".")[0])
-    if not os.path.exists(this_dir):
-        os.mkdir(this_dir)
-            
-        vidcap = cv2.VideoCapture(video_name)
+    return label, rating_hard, rating_soft, vid_name
+
+
+def predict_video(path, model, stride, device, cf):
+    video_name = download_video(path)
+    vid_name = path.split('/')[-1].split('.')[0]
+    print(vid_name)
+    save_dir = 'video_temp'
+    check_valid_video_folder(save_dir)
+    st = time.time()
+    vidcap = cv2.VideoCapture(video_name)
+    fps = int(vidcap.get(cv2.CAP_PROP_FPS))
+    frame_count = int(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
+    duration = round(frame_count/fps)
+    print(duration)
+    print(fps)
+    if not fps:
+        fps = 25
+    # success,image = vidcap.read()
+    count = 0
+    frames = []
+    im0s = []
+    preprocess_time = 0
+    while vidcap.isOpened():
         success,image = vidcap.read()
-        count = 0
-        while success:
-            cv2.imwrite("{}/frame{}.jpg".format(this_dir, count), image)     # save frame as JPEG file      
-            success,image = vidcap.read()
-            # print('Read a new frame: ', success)
+        if isinstance(image, np.ndarray):
+            if count % fps == 0:
+                sub_st = time.time()
+                frames.append(preprocess_img(image, stride))
+                sub_end = time.time()
+                preprocess_time += sub_end - sub_st
+                im0s.append(image)
+                # cv2.imwrite("{}/frame{}.jpg".format(this_dir, count), image)     # save frame as JPEG file      
             count += 1
         else:
-            pass
+            break
+    vidcap.release()
+    os.remove(video_name)
+    end = time.time()
+    time_extract = round(end - st)
 
-    st = time.time()
-    model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
-    dataset = LoadImages(this_dir, img_size=640, stride=stride)
-    end_init = time.time()
-    print('Init and load dataset cost: {}s'.format(end_init-st))
+    # print("len of dataset: {}".format(len(frames)))
     half = device != 'cpu'
 
     if half:
         model = model.half()
 
-    for path, img, im0s, vid_cap in dataset:
-        img = torch.from_numpy(img).to(device)
-        img = img.half() if half else img.float()  # uint8 to fp16/32
-        img /= 255.0  # 0 - 255 to 0.0 - 1.0
-        if img.ndimension() == 3:
-            img = img.unsqueeze(0)
+    label = "normal"
+
+    ind = 0
+    bs = 64
+    st = time.time()
+    while ind < len(frames):
+        if ind + bs <= len(frames):
+            batch = frames[ind:ind+bs]
+        else:
+            batch = frames[ind:ind+bs]
+            batch += [frames[-1]]*bs
+            batch = batch[:bs]
+
+        # batch = batch/255.
+        batch = np.array(batch)
+        batch = torch.from_numpy(batch).to(device)
+        batch = batch.half() if half else batch.float()  # uint8 to fp16/32
 
         # Inference
         t1 = time_synchronized()
-        pred = model(img)[0]
+        pred = predict_batch(model, batch)
         t2 = time_synchronized()
 
         # Apply NMS
@@ -201,49 +291,46 @@ def predict_video_path(path, cf):
         t3 = time_synchronized()
 
         # Process detections
-        for i, det in enumerate(pred):  # detections per image
-            # print(det, det.size())
-            
-            p, s, im0, frame = path, '', im0s, getattr(dataset, 'frame', 0)
+        for i, det in enumerate(pred): # 64 C H W
+            # print(ind, i)
+            # print(len(im0s)) # detections per image
+            if ind + i >= len(im0s):
+                pass
+            else:
+                im0 = im0s[ind+i]
+                gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]
+                if len(det):
+                    # Rescale boxes from img_size to im0 size
+                    det[:, :4] = scale_coords(frames[ind+i].shape[1:], det[:, :4], im0.shape).round()
 
-            p = Path(p)  # to Path
-            save_path = '{}/{}'.format(save_dir, p.name)  # img.jpg
-            txt_path = '{}/{}'.format(save_dir, p.stem) + ('' if dataset.mode == 'image' else f'_{frame}')  # img.txt
-            gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
-            if len(det):
-                # Rescale boxes from img_size to im0 size
-                det[:, :4] = scale_coords(img.shape[2:], det[:, :4], im0.shape).round()
+                    # Print results
 
-                # Print results
-                for c in det[:, -1].unique():
-                    n = (det[:, -1] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                    # Write results
+                    for *xyxy, conf, cls in reversed(det):
 
-                # Write results
-                for *xyxy, conf, cls in reversed(det):
-                    if cf.save_img:  # Write to file
+                        # Write to file
                         xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf)  # label format
-                        with open(txt_path + '.txt', 'a') as f:
+                        line = (cls, *xywh, conf) # label format
+                        with open('video_temp/{}.txt'.format(vid_name), 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
+                        f.close()
 
-                    if cf.save_img:  # Add bbox to image
-                        label = f'{names[int(cls)]} {conf:.2f}'
-                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)], line_thickness=1)
-
-            # Print time (inference + NMS)
-            # print(f'{s}Done. ({(1E3 * (t2 - t1)):.1f}ms) Inference, ({(1E3 * (t3 - t2)):.1f}ms) NMS')
-
-            # Save results (image with detections)
-            if cf.save_img:
-                # if dataset.mode == 'image':
-                cv2.imwrite(save_path, im0)
-                # print(f" The image with the result is saved in: {save_path}")
-            if det.size(dim=0) > 0:
-                end_time = time.time()
-                print('Init and predict cost: {}s'.format(end_time - st))
-                return "nine_dash_line"
+                    # Add bbox to image
+                        label = f'{conf:.2f}'
+                        # plot_one_box(xyxy, im0s[ind+i], label=label, color=colors[int(cls)], line_thickness=1)
+                        plot_one_box(xyxy, im0, line_thickness=3)
+                    cv2.imwrite('video_temp/{}.png'.format(vid_name), im0)
+                    print("The image with the result is saved in: video_temp/{}.png".format(vid_name))
+        
+        ind += bs
     
     end_time = time.time()
-    print('Init and predict cost: {}s'.format(end_time - st))
-    return "binh_thuong"
+    # shutil.rmtree(this_dir)
+    print('Extracting video costs: {}s'.format(time_extract))
+    print('Preprocessing image costs: {}s'.format(round(preprocess_time)))
+    print('Detection costs: {}s to run over video {}.mp4 with length of {}s'.format(round(end_time - st), vid_name, duration))
+    with open('video_temp/{}.txt'.format(vid_name), 'a') as f:
+        f.write('Extracting video costs: {}s \n'.format(time_extract))
+        f.write('Detection costs: {}s to run over video {}.mp4 with length of {}s'.format(round(end_time - st), vid_name, duration))
+    f.close()
+    return label

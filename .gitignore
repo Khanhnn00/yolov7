@@ -6,6 +6,9 @@ __pycache__
 *.zip
 *.pt
 *.onnx
+api/results_detect/*
+api/video_temp/*
+api/exp*
 =======
 # Repo-specific GitIgnore ----------------------------------------------------------------------------------------------
 *.jpg

@@ -1,4 +1,6 @@
 import os
+import torch
+import random
 import time
 from json import loads, dumps
 import requests
@@ -10,8 +12,29 @@ import sys
 import inspect
 
 
-from api_utils import predict_video
+from api_utils import predict_video_path
+from models.experimental import attempt_load
 import config as cf
+
+def init_model(cf):
+
+    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
+    # device = 'cpu'
+    
+    model = attempt_load(cf.model['weight'], map_location=device)
+    names = model.module.names if hasattr(model, 'module') else model.names
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in names]
+    stride = int(model.stride.max())  # model stride
+    imgsz = cf.model['image_size']
+    model.eval()
+
+    save_dir = 'results_detect'
+    if not os.path.exists(save_dir):
+        os.mkdir(save_dir)
+
+    print('Finished init model')
+
+    return model, names, colors, imgsz, stride, save_dir, device
 
 def run():
     consumer = KafkaConsumer(topics,
@@ -34,7 +57,8 @@ def run():
                 continue
 
             # process video
-            label = predict_video(url, cf)
+            model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
+            label = predict_video_path(url, model, stride, device, cf, save_dir)
             print(label)
             # label = 'binh_thuong' if label['label'] == True else 'hsts_invalid'
             # print(label)
