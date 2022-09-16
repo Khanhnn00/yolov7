@@ -69,6 +69,7 @@ def predict_video_path(path, model, stride, device, cf, save_dir):
     st = time.time()
     vidcap = cv2.VideoCapture(video_name)
     fps = round(vidcap.get(cv2.CAP_PROP_FPS))
+    print(fps)
     frame_count = round(vidcap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration = round(frame_count/fps)
     # print(duration)
@@ -187,7 +188,7 @@ def predict_video_path(path, model, stride, device, cf, save_dir):
     print('Extracting video costs: {}s'.format(time_extract))
     print('Detection costs: {}s to run over video {}.mp4 with length of {}s'.format(round(end_time - st), vid_name, duration))
     print('Total bboxes found: {}'.format(cnt_total))
-    print('Total bboxes with c  onf > 0.55: {}'.format(hard_margin))
+    print('Total bboxes with conf > 0.55: {}'.format(hard_margin))
     print('Total bboxes with conf < 0.5: {}'.format(soft_margin))
     if cnt_total == 0:
         rating_hard = 0
@@ -197,15 +198,15 @@ def predict_video_path(path, model, stride, device, cf, save_dir):
         rating_soft = soft_margin/cnt_total
 
     if cnt >= thresh:
-        label = "ndl"
+        label = "nine_dash_line"
     else:
-        label = "normal"
+        label = "binh_thuong"
 
     print('Rating hard: {}'.format(rating_hard))
     print('Rating soft: {}'.format(rating_soft))
     now = datetime.now()
     dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
-    with open('{}/{}.txt'.format(save_dir, 'result'), 'a') as f:
+    with open('{}/{}.txt'.format(save_dir, 'logs'), 'a') as f:
         f.write('{} \n'.format(dt_string))
         f.write('Extracting video costs: {}s \n'.format(time_extract))
         f.write('Detection costs: {}s to run over video {}.mp4 with length of {}s \n'.format(round(end_time - st), vid_name, duration))
@@ -217,7 +218,7 @@ def predict_video_path(path, model, stride, device, cf, save_dir):
     f.close()
 
     
-    return label, rating_hard, rating_soft, vid_name
+    return label
 
 
 def predict_video(path, model, stride, device, cf):

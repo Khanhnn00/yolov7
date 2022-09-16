@@ -18,7 +18,7 @@ import config as cf
 
 def init_model(cf):
 
-    device = 'cuda:1' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     # device = 'cpu'
     
     model = attempt_load(cf.model['weight'], map_location=device)
@@ -47,39 +47,43 @@ def run():
     for message in consumer:
         print('message')
         print('running')
-        try:
-            print ("%s:%d:%d: value=%s" % (message.topic, message.partition, message.offset, message.value))
-            data = message.value
-            url = data['url']
-            create_time = data['create_time']
-            label = data['hs_ts']
-            if label != None:
-                continue
+        # try:
+        print ("%s:%d:%d: value=%s" % (message.topic, message.partition, message.offset, message.value))
+        data = message.value
+        url = data['url']
+        create_time = data['create_time']
+        label = data['nine_dash_line']
 
-            # process video
-            model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
-            label = predict_video_path(url, model, stride, device, cf, save_dir)
-            print(label)
-            # label = 'binh_thuong' if label['label'] == True else 'hsts_invalid'
-            # print(label)
-            
-            record = {
-                'url': url,
-                'label': label,
-                'model': 'nine_dash_line',
-                'create_time': create_time
-            }
-            resp = requests.post(callback, headers = {"Content-Type": "application/json"}, data = dumps(record))
-            consumer.commit_async()
-            print("Update record: %s %s \n" % (resp.status_code, resp.text))
-        except Exception as error:
-            print("Error: ", error)
+        print('finish getting info')
+
+        if label != None:
+            continue
+
+        # process video
+        # model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
+        label = predict_video_path(url, model, stride, device, cf, save_dir)
+        print(label)
+        # label = 'binh_thuong' if label['label'] == True else 'hsts_invalid'
+        # print(label)
+        
+        record = {
+            'url': url,
+            'label': label,
+            'model': 'nine_dash_line',
+            'create_time': create_time
+        }
+        resp = requests.post(callback, headers = {"Content-Type": "application/json"}, data = dumps(record))
+        consumer.commit_async()
+        print("Update record: %s %s \n" % (resp.status_code, resp.text))
+        # except Exception as error:
+        #     print("Error: ", error)
 
 
 if __name__ == '__main__':
     import config as cf
     
     print("Inint model \n")
+    model, names, colors, imgsz, stride, save_dir, device = init_model(cf)
     # vis_processor = VideoInference(cf.model, cf.device)
     
     print("Init kafka \n")

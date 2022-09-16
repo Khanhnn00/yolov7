@@ -1,5 +1,5 @@
 model = {
-    'weight': '../runs/train/yolov7-tiny-mixed/weights/best.pt',
+    'weight': '../best.pt',
     'conf': 0.4,
     'iou': 0.6,
     'image_size': 640,
